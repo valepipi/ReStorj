@@ -904,17 +904,15 @@ void data_manager::repair_segment(const std::string &segment_id)
     std::vector<stripe> stripes = dp.repair_stripes_from_erasure_shares(s);
     s.clear();
 
-    // TODO: stripe metadata 结合
     // 新 stripes 处理成 pieces
     // 切割成 stripes 并遍历
     s.reserve(stripes.size());
     for (int stripe_index = 0; stripe_index < stripes.size(); stripe_index++) {
         stripe &stripe = stripes[stripe_index];
-        // // stripe id
-        // stripe.id = uuid_v4();
-        // stripe.index = stripe_index;
-        // stripe.segment_id = segment.id;
-        // db_insert_stripe(stripe);
+        // stripe metadata 结合
+        stripe.id = stripes_metadata[stripe_index].id;
+        stripe.index = stripes_metadata[stripe_index].index;
+        stripe.segment_id = stripes_metadata[stripe_index].segment_id;
         // 编码成 erasure shares，该数组为纵向
         std::vector<erasure_share> shares = dp.erasure_encode(stripe);
         for (auto &share: shares) {
