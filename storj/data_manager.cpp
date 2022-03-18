@@ -374,15 +374,23 @@ void data_manager::db_remove_file_by_id(const std::string &id)
     const char *sql_remove = "delete\n"
                              "from \"file\"\n"
                              "where \"id\" = ?;";
-    sqlite3_exec(sql, sql_remove, nullptr, nullptr, nullptr);
+    sqlite3_stmt *stmt;
+    sqlite3_prepare_v2(sql, sql_remove, -1, &stmt, nullptr);
+    sqlite3_bind_text(stmt, 1, id.c_str(), id.length(), nullptr);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
 }
 
-void data_manager::db_remove_file_by_name(const std::string &id)
+void data_manager::db_remove_file_by_name(const std::string &name)
 {
     const char *sql_remove = "delete\n"
                              "from \"file\"\n"
                              "where \"name\" = ?;";
-    sqlite3_exec(sql, sql_remove, nullptr, nullptr, nullptr);
+    sqlite3_stmt *stmt;
+    sqlite3_prepare_v2(sql, sql_remove, -1, &stmt, nullptr);
+    sqlite3_bind_text(stmt, 1, name.c_str(), name.length(), nullptr);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
 }
 
 void data_manager::db_remove_segment(const std::string &id)
@@ -390,7 +398,11 @@ void data_manager::db_remove_segment(const std::string &id)
     const char *sql_remove = "delete\n"
                              "from \"segment\"\n"
                              "where \"id\" = ?;";
-    sqlite3_exec(sql, sql_remove, nullptr, nullptr, nullptr);
+    sqlite3_stmt *stmt;
+    sqlite3_prepare_v2(sql, sql_remove, -1, &stmt, nullptr);
+    sqlite3_bind_text(stmt, 1, id.c_str(), id.length(), nullptr);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
 }
 
 void data_manager::db_remove_stripe(const std::string &id)
@@ -398,7 +410,11 @@ void data_manager::db_remove_stripe(const std::string &id)
     const char *sql_remove = "delete\n"
                              "from \"stripe\"\n"
                              "where \"id\" = ?;";
-    sqlite3_exec(sql, sql_remove, nullptr, nullptr, nullptr);
+    sqlite3_stmt *stmt;
+    sqlite3_prepare_v2(sql, sql_remove, -1, &stmt, nullptr);
+    sqlite3_bind_text(stmt, 1, id.c_str(), id.length(), nullptr);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
 }
 
 void data_manager::db_remove_erasure_share(const std::string &id)
@@ -406,7 +422,11 @@ void data_manager::db_remove_erasure_share(const std::string &id)
     const char *sql_remove = "delete\n"
                              "from \"erasure_share\"\n"
                              "where \"id\" = ?;";
-    sqlite3_exec(sql, sql_remove, nullptr, nullptr, nullptr);
+    sqlite3_stmt *stmt;
+    sqlite3_prepare_v2(sql, sql_remove, -1, &stmt, nullptr);
+    sqlite3_bind_text(stmt, 1, id.c_str(), id.length(), nullptr);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
 }
 
 void data_manager::db_remove_piece(const std::string &id)
@@ -414,7 +434,11 @@ void data_manager::db_remove_piece(const std::string &id)
     const char *sql_remove = "delete\n"
                              "from \"piece\"\n"
                              "where \"id\" = ?;";
-    sqlite3_exec(sql, sql_remove, nullptr, nullptr, nullptr);
+    sqlite3_stmt *stmt;
+    sqlite3_prepare_v2(sql, sql_remove, -1, &stmt, nullptr);
+    sqlite3_bind_text(stmt, 1, id.c_str(), id.length(), nullptr);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
 }
 
 void data_manager::upload_piece(const piece &p, const storage_node &node)

@@ -56,7 +56,7 @@ namespace storj
         piece db_select_piece(const std::string &id);
 
         void db_remove_file_by_id(const std::string &id);
-        void db_remove_file_by_name(const std::string &filename);
+        void db_remove_file_by_name(const std::string &name);
         void db_remove_segment(const std::string &id);
         void db_remove_stripe(const std::string &id);
         void db_remove_erasure_share(const std::string &id);
