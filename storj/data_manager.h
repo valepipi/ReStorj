@@ -7,6 +7,7 @@
 
 
 #include <set>
+#include <sqlite3.h>
 #include <string>
 
 #include "storage_node.h"
@@ -47,7 +48,7 @@ namespace storj
         void db_insert_erasure_share(const erasure_share &es);
         void db_insert_piece(const piece &p);
 
-        file db_stmt_select_file(sqlite3_stmt *stmt, file *file);
+        void db_stmt_select_file(sqlite3_stmt *stmt, file *file);
         file db_select_file_by_id(const std::string &id);
         file db_select_file_by_name(const std::string &filename);
         segment db_select_segment(const std::string &id);
@@ -67,9 +68,10 @@ namespace storj
         virtual ~data_manager();
         void upload_file(const std::string &filename, const config &cfg);
         file download_file(const std::string &filename);
-        std::vector<std::string> scan_corrupted_segments();
+        std::tuple<std::vector<std::string>, std::vector<int>, std::vector<int>> scan_corrupted_segments();
         void repair_segment(const std::string &segment_id);
 
+        static void sort_segments(std::vector<std::string> &segment_ids, std::vector<int> &ks, std::vector<int> &rs);
     };
 }
 

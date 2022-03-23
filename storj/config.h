@@ -18,6 +18,10 @@ namespace storj
         int k;
         int m;
         int n;
+
+        static double failure_rate;
+        static int total_nodes;
+        static double min_churn_per_round;
     };
 }
 

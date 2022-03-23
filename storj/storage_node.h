@@ -17,6 +17,10 @@ struct storage_node
 
     bool operator==(const storage_node &rhs) const;
     bool operator!=(const storage_node &rhs) const;
+    bool operator<(const storage_node &rhs) const;
+    bool operator>(const storage_node &rhs) const;
+    bool operator<=(const storage_node &rhs) const;
+    bool operator>=(const storage_node &rhs) const;
 };
 
 

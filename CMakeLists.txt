@@ -19,7 +19,9 @@ add_executable(storj_emulator main.cpp
         storj/data_manager.cpp
         storj/data_manager.h
         storj/file.cpp
-        storj/file.h storj/storage_node.cpp storj/storage_node.h)
+        storj/file.h
+        storj/storage_node.cpp
+        storj/storage_node.h)
 
 find_package(SQLite3)
 if (SQLITE3_FOUND)

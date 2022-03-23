@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <fcntl.h>
-#include <iostream>
 #include <sqlite3.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -240,7 +239,7 @@ void data_manager::db_insert_piece(const piece &p)
     sqlite3_finalize(stmt);
 }
 
-file data_manager::db_stmt_select_file(sqlite3_stmt *stmt, file *file)
+void data_manager::db_stmt_select_file(sqlite3_stmt *stmt, file *file)
 {
     boost::uuids::string_generator sg;
     file->id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 1)));
@@ -718,7 +717,6 @@ file data_manager::download_file(const std::string &filename)
         }
 
         // erasure share decode，纵向拼接成 stripe，赋值元数据
-        // FIXME: 拼接得到的 stripes 是否按顺序？
         std::vector<stripe> stripes = dp.merge_to_stripes(s);
         for (int i = 0; i < stripes.size(); i++) {
             stripes[i].id = stripes_metadata[i].id;
@@ -741,9 +739,15 @@ file data_manager::download_file(const std::string &filename)
     return file;
 }
 
-std::vector<std::string> data_manager::scan_corrupted_segments()
+/**
+ * 扫描需要修复的 segments
+ * @return segment ids, ks, rs
+ */
+std::tuple<std::vector<std::string>, std::vector<int>, std::vector<int>> data_manager::scan_corrupted_segments()
 {
     std::vector<std::string> segments_to_repair;
+    std::vector<int> ks;
+    std::vector<int> rs;
     // 查询并遍历所有 file
     std::vector<file> files;
     {
@@ -751,7 +755,7 @@ std::vector<std::string> data_manager::scan_corrupted_segments()
                                  "from \"file\";";
         sqlite3_stmt *stmt;
         if (sqlite3_prepare_v2(sql, sql_select, -1, &stmt, nullptr) != SQLITE_OK) {
-            return segments_to_repair;
+            return {};
         }
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             file file;
@@ -773,7 +777,8 @@ std::vector<std::string> data_manager::scan_corrupted_segments()
                 continue;
             }
             while (sqlite3_step(stmt) == SQLITE_ROW) {
-                segment_ids.emplace_back(std::string(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1))));
+                const std::string &segment_id = std::string(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1)));
+                segment_ids.emplace_back(segment_id);
             }
             sqlite3_finalize(stmt);
         }
@@ -803,11 +808,13 @@ std::vector<std::string> data_manager::scan_corrupted_segments()
                 // 当剩余 piece 数小于 m 时，将 segment id 和缺失的 piece id 加入到结果中
                 if (count <= file.cfg.m) {
                     segments_to_repair.emplace_back(segment_id);
+                    ks.emplace_back(file.cfg.k);
+                    rs.emplace_back(count);
                 }
             }
         }
     }
-    return segments_to_repair;
+    return std::make_tuple(segments_to_repair, ks, rs);
 }
 
 /**
@@ -976,30 +983,56 @@ void data_manager::repair_segment(const std::string &segment_id)
     // 删除数据库中的旧的 erasure share 和 piece
     // 删除 storage nodes 中的 pieces
     for (const auto &piece_id: piece_ids) {
-        {
-            const char *sql_remove = "delete\n"
-                                     "from \"erasure_share\"\n"
-                                     "where \"piece_id\" = ?;";
-            sqlite3_stmt *stmt;
-            if (sqlite3_prepare_v2(sql, sql_remove, -1, &stmt, nullptr) != SQLITE_OK) {
-                continue;
-            }
-            sqlite3_bind_text(stmt, 1, piece_id.c_str(), piece_id.length(), nullptr);
-            sqlite3_step(stmt);
-            sqlite3_finalize(stmt);
+        const char *sql_remove = "delete\n"
+                                 "from \"erasure_share\"\n"
+                                 "where \"piece_id\" = ?;";
+        sqlite3_stmt *stmt;
+        if (sqlite3_prepare_v2(sql, sql_remove, -1, &stmt, nullptr) != SQLITE_OK) {
+            continue;
         }
-        {
-            const char *sql_remove = "delete\n"
-                                     "from \"piece\"\n"
-                                     "where \"id\" = ?;";
-            sqlite3_stmt *stmt;
-            if (sqlite3_prepare_v2(sql, sql_remove, -1, &stmt, nullptr) != SQLITE_OK) {
-                continue;
-            }
-            sqlite3_bind_text(stmt, 1, piece_id.c_str(), piece_id.length(), nullptr);
-            sqlite3_step(stmt);
-            sqlite3_finalize(stmt);
-        }
+        sqlite3_bind_text(stmt, 1, piece_id.c_str(), piece_id.length(), nullptr);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
         remove_piece(piece_id);
+    }
+}
+
+void data_manager::sort_segments(std::vector<std::string> &segment_ids, std::vector<int> &ks, std::vector<int> &rs)
+{
+    if (segment_ids.size() != ks.size() || segment_ids.size() != rs.size()) {
+        return;
+    }
+    // 记录 segment id 与 k, r 的对应关系
+    std::unordered_map<std::string, std::pair<int, int>> map;
+    for (int i = 0; i < segment_ids.size(); i++) {
+        map.emplace(segment_ids[i], std::make_pair(ks[i], rs[i]));
+    }
+
+    // 评分函数
+    const auto &weight = [=](const int k, const int r) {
+        double churn_per_round = config::failure_rate * config::total_nodes;
+        if (churn_per_round < config::min_churn_per_round) {
+            churn_per_round = config::min_churn_per_round;
+        }
+        double p = double(config::total_nodes - r) / config::total_nodes;
+        double mean = double(r - k + 1) * p / (1 - p);
+        return mean / churn_per_round;
+    };
+
+    // 排序规则
+    const auto &less = [=](const std::string &a, const std::string &b) {
+        const std::pair<int, int> &p1 = map.at(a);
+        const std::pair<int, int> &p2 = map.at(b);
+        return weight(p1.first, p1.second) < weight(p2.first, p2.second);
+    };
+
+    // 排序
+    std::sort(segment_ids.begin(), segment_ids.end(), less);
+
+    // 重新赋值 ks, rs
+    for (int i = 0; i < segment_ids.size(); i++) {
+        const auto &pair = map[segment_ids[i]];
+        ks[i] = pair.first;
+        rs[i] = pair.second;
     }
 }
