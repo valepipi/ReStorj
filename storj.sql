@@ -16,20 +16,6 @@ create table if not exists "segment"
     "index"   int(11)                 not null,
     "file_id" varchar(64)             not null
 );
-create table if not exists "stripe"
-(
-    "id"         varchar(64) primary key not null,
-    "index"      int(11)                 not null,
-    "segment_id" varchar(64)             not null
-);
-create table if not exists "erasure_share"
-(
-    "id"        varchar(64) primary key not null,
-    "x_index"   int(11)                 not null,
-    "y_index"   int(11)                 not null,
-    "stripe_id" varchar(64)             not null,
-    "piece_id"  varchar(64)             not null
-);
 create table if not exists "piece"
 (
     "id"              varchar(64) primary key not null,
@@ -46,10 +32,6 @@ insert into "file"("id", "file_name", "file_size", "segment_size", "stripe_size"
 values (?, ?, ?, ?, ?, ?, ?, ?, ?);
 insert into "segment"("id", "index", "file_id")
 values (?, ?, ?);
-insert into "stripe"("id", "index", "segment_id")
-values (?, ?, ?);
-insert into "erasure_share"("id", "x_index", "y_index", "stripe_id", "piece_id")
-values (?, ?, ?, ?, ?);
 insert into "piece"("id", "index", "segment_id", "storage_node_id")
 values (?, ?, ?, ?);
 insert into "storage_node"("id")
@@ -101,21 +83,12 @@ where "f"."id" = ?;
 
 select "p"."id"
 from "segment" "s"
-         left join "stripe" "s2" on "s"."id" = "s2"."segment_id"
-         left join "erasure_share" "es" on "s2"."id" = "es"."stripe_id"
-         left join "piece" "p" on "p"."id" = "es"."piece_id"
-where "s"."id" = ?;
+         left join "piece" "p" on "s"."id" = "p"."segment_id"
+where "s"."id" = ?
+order by "p"."index";
 
 select count(1)
 from "storage_node";
-
-delete
-from "stripe"
-where "id" = ?;
-
-delete
-from "erasure_share"
-where "piece_id" = ?;
 
 delete
 from "piece"
