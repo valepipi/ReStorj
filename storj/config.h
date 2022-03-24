@@ -22,6 +22,8 @@ namespace storj
         static double failure_rate;
         static int total_nodes;
         static double min_churn_per_round;
+
+        config();
     };
 }
 

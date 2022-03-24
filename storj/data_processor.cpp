@@ -24,11 +24,13 @@ std::vector<segment> data_processor::split_file(file &f)
     }
 
     // 以 size 为单位读取文件
-    char segment_data[cfg.segment_size];
+    char *segment_data = new char[cfg.segment_size];
     int n;
     while ((n = read(fd, segment_data, cfg.segment_size)) > 0) {
         f.segments.emplace_back(std::vector<char>(segment_data, segment_data + n));
     }
+    delete[] segment_data;
+
 
     // 最后一个 segment 补 0
     if (!f.segments.empty()) {
@@ -40,7 +42,7 @@ std::vector<segment> data_processor::split_file(file &f)
     return f.segments;
 }
 
-std::vector<stripe> data_processor::split_segment(const segment &s) const
+std::vector<stripe> data_processor::split_segment(segment &s) const
 {
     // 创建变量，预留空间
     std::vector<stripe> stripes;
@@ -49,25 +51,33 @@ std::vector<stripe> data_processor::split_segment(const segment &s) const
     for (auto it = s.data.begin(); it < s.data.end(); it += cfg.stripe_size) {
         std::vector<char> stripe_data;
         auto right = it + cfg.stripe_size;
-        stripe_data.assign(it, right);
+        stripe_data.reserve(right - it);
+        stripe_data.insert(stripe_data.end(), std::make_move_iterator(it), std::make_move_iterator(right));
         stripes.emplace_back(stripe_data);
     }
+    s.data.clear();
     return stripes;
 }
 
-std::vector<erasure_share> data_processor::erasure_encode(const stripe &s) const
+std::vector<erasure_share> data_processor::erasure_encode(stripe &s) const
 {
     // TODO: erasure encode
     // 创建变量，预留空间
     std::vector<erasure_share> shares;
-    shares.reserve(s.data.size() / cfg.erasure_share_size);
+    shares.reserve(cfg.n);
     // 以 size 为单位遍历
     for (auto it = s.data.begin(); it < s.data.end(); it += cfg.erasure_share_size) {
         std::vector<char> erasure_share_data;
         auto right = it + cfg.erasure_share_size;
-        erasure_share_data.assign(it, right);
+        erasure_share_data.reserve(right - it);
+        erasure_share_data.insert(erasure_share_data.end(), std::make_move_iterator(it), std::make_move_iterator(right));
         shares.emplace_back(erasure_share_data);
     }
+    // 未实现 erasure encode，临时填充
+    while (shares.size() < cfg.n) {
+        shares.emplace_back(std::vector<char>(cfg.erasure_share_size, '\0'));
+    }
+    s.data.clear();
     return shares;
 }
 
@@ -81,19 +91,19 @@ std::vector<piece> data_processor::merge_to_pieces(std::vector<std::vector<erasu
     pieces.reserve(cfg.n);
     for (int y = 0; y < cfg.n; y++) {
         piece p;
-        for (int x = 0; x < s.size(); x++) {
-            erasure_share &share = s[x][y];
-            share.x_index = x;
-            share.y_index = y;
+        p.erasure_shares.reserve(s.size());
+        p.data.reserve(s.size() * cfg.erasure_share_size);
+        for (auto &shares: s) {
+            erasure_share &share = shares[y];
+            p.data.insert(p.data.end(), std::make_move_iterator(share.data.begin()), std::make_move_iterator(share.data.end()));
             p.erasure_shares.emplace_back(share);
-            p.data.insert(p.data.end(), share.data.begin(), share.data.end());
         }
         pieces.emplace_back(p);
     }
     return pieces;
 }
 
-std::vector<erasure_share> data_processor::split_piece(const piece &p) const
+std::vector<erasure_share> data_processor::split_piece(piece &p) const
 {
     // 创建变量，预留空间
     std::vector<erasure_share> shares;
@@ -102,24 +112,28 @@ std::vector<erasure_share> data_processor::split_piece(const piece &p) const
     for (auto it = p.data.begin(); it < p.data.end(); it += cfg.erasure_share_size) {
         std::vector<char> erasure_share_data;
         auto right = it + cfg.erasure_share_size;
-        erasure_share_data.assign(it, right);
+        erasure_share_data.reserve(right - it);
+        erasure_share_data.insert(erasure_share_data.end(), std::make_move_iterator(it), std::make_move_iterator(right));
         shares.emplace_back(erasure_share_data);
     }
+    p.data.clear();
     return shares;
 }
 
-std::vector<stripe> data_processor::merge_to_stripes(const std::vector<std::vector<erasure_share>> &s) const
+std::vector<stripe> data_processor::merge_to_stripes(std::vector<std::vector<erasure_share>> &s) const
 {
     // 粒度为 piece -> erasure share
     // s[i][j] 是单个 piece 切分出来的单个 erasure share
     // s[i]    是单个 piece 切分出来的所有 erasure shares
     // 即，需要交换遍历维度以转换成 stripe
     std::vector<stripe> stripes;
-    for (int y = 0; y < cfg.n; y++) {
+    // 未实现 erasure decode，临时处理数据，只需前 k 个 piece
+    for (int x = 0; x < cfg.segment_size / cfg.stripe_size; x++) {
         stripe stripe;
-        for (const auto &shares: s) {
-            const erasure_share &share = shares[y];
-            stripe.data.insert(stripe.data.end(), share.data.begin(), share.data.end());
+        stripe.data.reserve(cfg.stripe_size);
+        for (int y = 0; y < cfg.k; y++) {
+            erasure_share &share = s[y][x];
+            stripe.data.insert(stripe.data.end(), std::make_move_iterator(share.data.begin()), std::make_move_iterator(share.data.end()));
         }
         stripes.emplace_back(stripe);
     }
@@ -127,16 +141,16 @@ std::vector<stripe> data_processor::merge_to_stripes(const std::vector<std::vect
     return stripes;
 }
 
-segment data_processor::merge_to_segment(const std::vector<stripe> &stripes) const
+segment data_processor::merge_to_segment(std::vector<stripe> &stripes) const
 {
     segment res;
-    for (const auto &stripe: stripes) {
-        res.data.insert(res.data.end(), stripe.data.begin(), stripe.data.end());
+    for (auto &stripe: stripes) {
+        res.data.insert(res.data.end(), std::make_move_iterator(stripe.data.begin()), std::make_move_iterator(stripe.data.end()));
     }
     return res;
 }
 
-file data_processor::merge_to_file(const std::vector<segment> &segments) const
+file data_processor::merge_to_file(std::vector<segment> &segments) const
 {
     file res;
     res.segments = segments;

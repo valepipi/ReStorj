@@ -19,6 +19,8 @@ namespace storj
     {
         boost::uuids::uuid id;
         boost::uuids::uuid storage_node_id;
+        int index;
+        boost::uuids::uuid segment_id;
         std::vector<char> data;
         std::vector<erasure_share> erasure_shares;
 

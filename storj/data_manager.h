@@ -44,7 +44,6 @@ namespace storj
 
         void db_insert_file(const file &f);
         void db_insert_segment(const segment &s);
-        void db_insert_stripe(const stripe &s);
         void db_insert_erasure_share(const erasure_share &es);
         void db_insert_piece(const piece &p);
 
@@ -52,15 +51,11 @@ namespace storj
         file db_select_file_by_id(const std::string &id);
         file db_select_file_by_name(const std::string &filename);
         segment db_select_segment(const std::string &id);
-        stripe db_select_stripe(const std::string &id);
-        erasure_share db_select_erasure_share(const std::string &id);
         piece db_select_piece(const std::string &id);
 
         void db_remove_file_by_id(const std::string &id);
         void db_remove_file_by_name(const std::string &name);
         void db_remove_segment(const std::string &id);
-        void db_remove_stripe(const std::string &id);
-        void db_remove_erasure_share(const std::string &id);
         void db_remove_piece(const std::string &id);
 
     public:

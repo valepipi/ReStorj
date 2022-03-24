@@ -7,7 +7,6 @@
 #include <sqlite3.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <unordered_map>
 
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
@@ -59,36 +58,22 @@ void data_manager::init_db()
                                            "    \"index\"   int(11)                 not null,\n"
                                            "    \"file_id\" varchar(64)             not null\n"
                                            ");";
-    const char *sql_create_table_stripe = "create table if not exists \"stripe\"\n"
-                                          "(\n"
-                                          "    \"id\"         varchar(64) primary key not null,\n"
-                                          "    \"index\"      int(11)                 not null,\n"
-                                          "    \"segment_id\" varchar(64)             not null\n"
-                                          ");";
-    const char *sql_create_table_erasure_share = "create table if not exists \"erasure_share\"\n"
-                                                 "(\n"
-                                                 "    \"id\"        varchar(64) primary key not null,\n"
-                                                 "    \"x_index\"   int(11)                 not null,\n"
-                                                 "    \"y_index\"   int(11)                 not null,\n"
-                                                 "    \"stripe_id\" varchar(64)             not null,\n"
-                                                 "    \"piece_id\"  varchar(64)             not null\n"
-                                                 ");";
     const char *sql_create_table_piece = "create table if not exists \"piece\"\n"
                                          "(\n"
                                          "    \"id\"              varchar(64) primary key not null,\n"
+                                         "    \"index\"           int(11)                 not null,\n"
+                                         "    \"segment_id\"      varchar(64)             not null,\n"
                                          "    \"storage_node_id\" int(11)                 not null\n"
                                          ");";
     const char *sql_create_table_storage_node = "create table if not exists \"storage_node\"\n"
                                                 "(\n"
-                                                "    \"id\" int(11) primary key not null\n"
+                                                "    \"id\" varchar(64) primary key not null\n"
                                                 ");";
     // 打开数据库
     sqlite3_open_v2("storj.db", &sql, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_SHAREDCACHE, nullptr);
     // 创建数据表
     sqlite3_exec(sql, sql_create_table_file, nullptr, nullptr, nullptr);
     sqlite3_exec(sql, sql_create_table_segment, nullptr, nullptr, nullptr);
-    sqlite3_exec(sql, sql_create_table_stripe, nullptr, nullptr, nullptr);
-    sqlite3_exec(sql, sql_create_table_erasure_share, nullptr, nullptr, nullptr);
     sqlite3_exec(sql, sql_create_table_piece, nullptr, nullptr, nullptr);
     sqlite3_exec(sql, sql_create_table_storage_node, nullptr, nullptr, nullptr);
 }
@@ -103,7 +88,7 @@ void data_manager::init_storage_nodes()
         sqlite3_stmt *stmt;
         sqlite3_prepare_v2(sql, sql_select, -1, &stmt, nullptr);
         sqlite3_step(stmt);
-        node_count = sqlite3_column_int(stmt, 1);
+        node_count = sqlite3_column_int(stmt, 0);
         sqlite3_finalize(stmt);
     }
     // 补足节点数量
@@ -126,7 +111,7 @@ void data_manager::init_storage_nodes()
         sqlite3_stmt *stmt;
         sqlite3_prepare_v2(sql, sql_select, -1, &stmt, nullptr);
         while (sqlite3_step(stmt) == SQLITE_ROW) {
-            const boost::uuids::uuid &node_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 1)));
+            const boost::uuids::uuid &node_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 0)));
             storage_nodes.emplace(node_id);
         }
         sqlite3_finalize(stmt);
@@ -183,26 +168,13 @@ void data_manager::db_insert_segment(const segment &s)
 {
     const std::string &segment_id = to_string(s.id);
     const std::string &file_id = to_string(s.file_id);
-    const char *sql_insert = "insert into \"segment\"(\"id\", \"y_index\", \"file_id\")\n"
+    const char *sql_insert = "insert into \"segment\"(\"id\", \"index\", \"file_id\")\n"
                              "values (?, ?, ?);";
     sqlite3_stmt *stmt;
     sqlite3_prepare_v2(sql, sql_insert, -1, &stmt, nullptr);
     sqlite3_bind_text(stmt, 1, segment_id.c_str(), segment_id.length(), nullptr);
-    sqlite3_bind_text(stmt, 2, file_id.c_str(), file_id.length(), nullptr);
-    sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-}
-
-void data_manager::db_insert_stripe(const stripe &s)
-{
-    const std::string &stripe_id = to_string(s.id);
-    const std::string &segment_id = to_string(s.segment_id);
-    const char *sql_insert = "insert into \"stripe\"(\"id\", \"y_index\", \"segment_id\")\n"
-                             "values (?, ?, ?);";
-    sqlite3_stmt *stmt;
-    sqlite3_prepare_v2(sql, sql_insert, -1, &stmt, nullptr);
-    sqlite3_bind_text(stmt, 1, stripe_id.c_str(), stripe_id.length(), nullptr);
-    sqlite3_bind_text(stmt, 2, segment_id.c_str(), segment_id.length(), nullptr);
+    sqlite3_bind_int(stmt, 2, s.index);
+    sqlite3_bind_text(stmt, 3, file_id.c_str(), file_id.length(), nullptr);
     sqlite3_step(stmt);
     sqlite3_finalize(stmt);
 }
@@ -228,13 +200,16 @@ void data_manager::db_insert_erasure_share(const erasure_share &es)
 void data_manager::db_insert_piece(const piece &p)
 {
     const std::string &piece_id = to_string(p.id);
+    const std::string &segment_id = to_string(p.segment_id);
     const std::string &storage_node_id = to_string(p.storage_node_id);
-    const char *sql_insert = "insert into \"piece\"(\"id\", \"storage_node_id\")\n"
-                             "values (?, ?);";
+    const char *sql_insert = "insert into \"piece\"(\"id\", \"index\", \"segment_id\", \"storage_node_id\")\n"
+                             "values (?, ?, ?, ?);";
     sqlite3_stmt *stmt;
     sqlite3_prepare_v2(sql, sql_insert, -1, &stmt, nullptr);
     sqlite3_bind_text(stmt, 1, piece_id.c_str(), piece_id.length(), nullptr);
-    sqlite3_bind_text(stmt, 2, storage_node_id.c_str(), storage_node_id.length(), nullptr);
+    sqlite3_bind_int(stmt, 2, p.index);
+    sqlite3_bind_text(stmt, 3, segment_id.c_str(), segment_id.length(), nullptr);
+    sqlite3_bind_text(stmt, 4, storage_node_id.c_str(), storage_node_id.length(), nullptr);
     sqlite3_step(stmt);
     sqlite3_finalize(stmt);
 }
@@ -242,15 +217,15 @@ void data_manager::db_insert_piece(const piece &p)
 void data_manager::db_stmt_select_file(sqlite3_stmt *stmt, file *file)
 {
     boost::uuids::string_generator sg;
-    file->id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 1)));
-    file->name = std::string(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2)));
-    file->cfg.file_size = sqlite3_column_int(stmt, 3);
-    file->cfg.segment_size = sqlite3_column_int(stmt, 4);
-    file->cfg.stripe_size = sqlite3_column_int(stmt, 5);
-    file->cfg.erasure_share_size = sqlite3_column_int(stmt, 6);
-    file->cfg.k = sqlite3_column_int(stmt, 7);
-    file->cfg.m = sqlite3_column_int(stmt, 8);
-    file->cfg.n = sqlite3_column_int(stmt, 9);
+    file->id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 0)));
+    file->name = std::string(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1)));
+    file->cfg.file_size = sqlite3_column_int(stmt, 2);
+    file->cfg.segment_size = sqlite3_column_int(stmt, 3);
+    file->cfg.stripe_size = sqlite3_column_int(stmt, 4);
+    file->cfg.erasure_share_size = sqlite3_column_int(stmt, 5);
+    file->cfg.k = sqlite3_column_int(stmt, 6);
+    file->cfg.m = sqlite3_column_int(stmt, 7);
+    file->cfg.n = sqlite3_column_int(stmt, 8);
 }
 
 file data_manager::db_select_file_by_id(const std::string &id)
@@ -264,7 +239,9 @@ file data_manager::db_select_file_by_id(const std::string &id)
         return res;
     }
     sqlite3_bind_text(stmt, 1, id.c_str(), id.length(), nullptr);
-    sqlite3_step(stmt);
+    if (sqlite3_step(stmt) != SQLITE_ROW) {
+        return res;
+    }
     db_stmt_select_file(stmt, &res);
     sqlite3_finalize(stmt);
     return res;
@@ -281,7 +258,9 @@ file data_manager::db_select_file_by_name(const std::string &filename)
         return res;
     }
     sqlite3_bind_text(stmt, 1, filename.c_str(), filename.length(), nullptr);
-    sqlite3_step(stmt);
+    if (sqlite3_step(stmt) != SQLITE_ROW) {
+        return res;
+    }
     db_stmt_select_file(stmt, &res);
     sqlite3_finalize(stmt);
     return res;
@@ -300,51 +279,9 @@ segment data_manager::db_select_segment(const std::string &id)
     }
     sqlite3_bind_text(stmt, 1, id.c_str(), id.length(), nullptr);
     sqlite3_step(stmt);
-    res.id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 1)));
-    res.index = sqlite3_column_int(stmt, 2);
-    res.file_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 3)));
-    sqlite3_finalize(stmt);
-    return res;
-}
-
-stripe data_manager::db_select_stripe(const std::string &id)
-{
-    boost::uuids::string_generator sg;
-    stripe res;
-    const char *sql_select = "select *\n"
-                             "from \"stripe\"\n"
-                             "where \"id\" = ?;";
-    sqlite3_stmt *stmt;
-    if (sqlite3_prepare_v2(sql, sql_select, -1, &stmt, nullptr) != SQLITE_OK) {
-        return res;
-    }
-    sqlite3_bind_text(stmt, 1, id.c_str(), id.length(), nullptr);
-    sqlite3_step(stmt);
-    res.id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 1)));
-    res.index = sqlite3_column_int(stmt, 2);
-    res.segment_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 3)));
-    sqlite3_finalize(stmt);
-    return res;
-}
-
-erasure_share data_manager::db_select_erasure_share(const std::string &id)
-{
-    boost::uuids::string_generator sg;
-    erasure_share res;
-    const char *sql_select = "select *\n"
-                             "from \"erasure_share\"\n"
-                             "where \"id\" = ?;";
-    sqlite3_stmt *stmt;
-    if (sqlite3_prepare_v2(sql, sql_select, -1, &stmt, nullptr) != SQLITE_OK) {
-        return res;
-    }
-    sqlite3_bind_text(stmt, 1, id.c_str(), id.length(), nullptr);
-    sqlite3_step(stmt);
-    res.id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 1)));
-    res.x_index = sqlite3_column_int(stmt, 2);
-    res.y_index = sqlite3_column_int(stmt, 3);
-    res.stripe_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 4)));
-    res.piece_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 5)));
+    res.id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 0)));
+    res.index = sqlite3_column_int(stmt, 1);
+    res.file_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 2)));
     sqlite3_finalize(stmt);
     return res;
 }
@@ -362,8 +299,10 @@ piece data_manager::db_select_piece(const std::string &id)
     }
     sqlite3_bind_text(stmt, 1, id.c_str(), id.length(), nullptr);
     sqlite3_step(stmt);
-    res.id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 1)));
-    res.storage_node_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 2)));
+    res.id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 0)));
+    res.index = sqlite3_column_int(stmt, 1);
+    res.segment_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 2)));
+    res.storage_node_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 3)));
     sqlite3_finalize(stmt);
     return res;
 }
@@ -404,30 +343,6 @@ void data_manager::db_remove_segment(const std::string &id)
     sqlite3_finalize(stmt);
 }
 
-void data_manager::db_remove_stripe(const std::string &id)
-{
-    const char *sql_remove = "delete\n"
-                             "from \"stripe\"\n"
-                             "where \"id\" = ?;";
-    sqlite3_stmt *stmt;
-    sqlite3_prepare_v2(sql, sql_remove, -1, &stmt, nullptr);
-    sqlite3_bind_text(stmt, 1, id.c_str(), id.length(), nullptr);
-    sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-}
-
-void data_manager::db_remove_erasure_share(const std::string &id)
-{
-    const char *sql_remove = "delete\n"
-                             "from \"erasure_share\"\n"
-                             "where \"id\" = ?;";
-    sqlite3_stmt *stmt;
-    sqlite3_prepare_v2(sql, sql_remove, -1, &stmt, nullptr);
-    sqlite3_bind_text(stmt, 1, id.c_str(), id.length(), nullptr);
-    sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-}
-
 void data_manager::db_remove_piece(const std::string &id)
 {
     const char *sql_remove = "delete\n"
@@ -450,8 +365,9 @@ void data_manager::upload_piece(const piece &p, const storage_node &node)
         return;
     }
     // 写内容
-    for (int i = 0; i < p.data.size(); i += 2048) {
-        int n = std::min(2048, (int) p.data.size() - i);
+    const int unit = 16 << 10;
+    for (int i = 0; i < p.data.size(); i += unit) {
+        int n = std::min(unit, (int) p.data.size() - i);
         if (write(fd, p.data.data() + i, n) <= 0) {
             perror("upload piece: Failed to write file");
             return;
@@ -472,10 +388,11 @@ piece data_manager::download_piece(const std::string &piece_id)
         return piece;
     }
     // 读内容
+    const int unit = 16 << 10;
+    char buf[unit];
     int i = 0;
-    char buf[2048];
     int n;
-    while ((n = read(fd, piece.data.data() + i, 2048)) > 0) {
+    while ((n = read(fd, buf, unit)) > 0) {
         piece.data.insert(piece.data.end(), buf, buf + n);
         i += n;
     }
@@ -520,70 +437,85 @@ bool data_manager::audit_piece(const std::string &piece_id)
  */
 void data_manager::upload_file(const std::string &filename, const config &cfg)
 {
-    data_processor dp(cfg);
-
-    // 随机生成 ID，记录数据对应关系到数据库
-    boost::uuids::random_generator uuid_v4;
-    file file(filename, cfg);
-    file.id = uuid_v4();
-    db_insert_file(file);
-
-    // 读文件，切割成 segment 并遍历
-    std::vector<segment> segments = dp.split_file(file);
-    for (int segment_index = 0; segment_index < segments.size(); segment_index++) {
-        segment &segment = segments[segment_index];
-        // segment id
-        segment.id = uuid_v4();
-        segment.index = segment_index;
-        segment.file_id = file.id;
-        db_insert_segment(segment);
-        // 切割成 stripes 并遍历
-        std::vector<stripe> stripes = dp.split_segment(segment);
-        std::vector<std::vector<erasure_share>> s;
-        s.reserve(stripes.size());
-        for (int stripe_index = 0; stripe_index < stripes.size(); stripe_index++) {
-            stripe &stripe = stripes[stripe_index];
-            // stripe id
-            stripe.id = uuid_v4();
-            stripe.index = stripe_index;
-            stripe.segment_id = segment.id;
-            db_insert_stripe(stripe);
-            // 编码成 erasure shares，该数组为纵向
-            std::vector<erasure_share> shares = dp.erasure_encode(stripe);
-            for (auto &share: shares) {
-                // erasure share id
-                share.id = uuid_v4();
-                share.stripe_id = stripe.id;
-            }
-            s.emplace_back(shares);
-        }
-
-        // erasure shares 横向合并成 pieces
-        std::vector<piece> pieces = dp.merge_to_pieces(s);
-        for (auto &piece: pieces) {
-            // piece id
-            piece.id = uuid_v4();
-            for (auto &share: piece.erasure_shares) {
-                share.piece_id = piece.id;
-                db_insert_erasure_share(share);
-            }
-        }
-
-        // 上传 pieces 到各个存储节点
-        auto piece = pieces.begin();
-        auto storage_node = storage_nodes.begin();
-        while (piece != pieces.end()) {
-            piece->storage_node_id = storage_node->id;
-            db_insert_piece(*piece);
-            upload_piece(*piece, *storage_node);
-            piece++;
-            storage_node++;
-            // 遍历到最后一个存储节点后，从第一个重新开始遍历
-            if (storage_node == storage_nodes.end()) {
-                storage_node = storage_nodes.begin();
-            }
-        }
+    // 判断是否有同名文件
+    const file &record = db_select_file_by_name(filename);
+    if (!record.id.is_nil()) {
+        puts("存在同名文件，无法上传");
+        return;
     }
+
+    try {
+        // 开始数据库事务
+        sqlite3_exec(sql, "begin transaction;", nullptr, nullptr, nullptr);
+
+        data_processor dp(cfg);
+
+        // 随机生成 ID，记录数据对应关系到数据库
+        boost::uuids::random_generator uuid_v4;
+        file file(filename, cfg);
+        file.id = uuid_v4();
+        db_insert_file(file);
+
+        // 读文件，切割成 segment 并遍历
+        std::vector<segment> segments = dp.split_file(file);
+        for (int segment_index = 0; segment_index < segments.size(); segment_index++) {
+            printf("segment index: %d\n", segment_index);
+            segment &segment = segments[segment_index];
+            // segment id
+            segment.id = uuid_v4();
+            segment.index = segment_index;
+            segment.file_id = file.id;
+            db_insert_segment(segment);
+            // 切割成 stripes 并遍历
+            puts("split segment");
+            std::vector<stripe> stripes = dp.split_segment(segment);
+            std::vector<std::vector<erasure_share>> s;
+            s.reserve(stripes.size());
+            for (auto &stripe: stripes) {
+                // 编码成 erasure shares，该数组为纵向
+                std::vector<erasure_share> shares = dp.erasure_encode(stripe);
+                s.emplace_back(shares);
+            }
+
+            // erasure shares 横向合并成 pieces
+            puts("merge to pieces");
+            std::vector<piece> pieces = dp.merge_to_pieces(s);
+            for (int piece_index = 0; piece_index < pieces.size(); piece_index++) {
+                piece &piece = pieces[piece_index];
+                // piece id
+                piece.id = uuid_v4();
+                piece.index = piece_index;
+                piece.segment_id = segment.id;
+                for (auto &share: piece.erasure_shares) {
+                    share.piece_id = piece.id;
+                }
+            }
+
+            // 上传 pieces 到各个存储节点
+            auto piece = pieces.begin();
+            auto storage_node = storage_nodes.begin();
+            while (piece != pieces.end()) {
+                piece->storage_node_id = storage_node->id;
+                upload_piece(*piece, *storage_node);
+                printf("upload piece id: %s\n", to_string(piece->id).c_str());
+                db_insert_piece(*piece);
+                piece++;
+                storage_node++;
+                // 遍历到最后一个存储节点后，从第一个重新开始遍历
+                if (storage_node == storage_nodes.end()) {
+                    storage_node = storage_nodes.begin();
+                }
+            }
+        }
+    } catch (int e) {
+        // 出现异常，回滚数据库
+        perror("Failed to upload file");
+        sqlite3_exec(sql, "rollback;", nullptr, nullptr, nullptr);
+        return;
+    }
+    // 提交事务
+    sqlite3_exec(sql, "commit;", nullptr, nullptr, nullptr);
+    puts("Upload file: Commit");
 }
 
 /**
@@ -608,35 +540,43 @@ file data_manager::download_file(const std::string &filename)
     file file = db_select_file_by_name(filename);
     data_processor dp(file.cfg);
 
-    // 从数据库中查出对应的 piece 数据
+    // 从数据库中有序查出对应的 piece 数据
     // 建立 segment id 到 pieces 的映射
     boost::uuids::string_generator sg;
-    std::unordered_map<std::string, std::vector<piece>> segment_id_to_pieces;
+    std::vector<std::pair<std::string, std::vector<piece>>> segment_id_to_pieces;
     {
         const char *sql_select = "select \"p\".\"id\",\n"
                                  "       \"sn\".\"id\",\n"
                                  "       \"s\".\"id\"\n"
                                  "from \"file\" \"f\"\n"
-                                 "         left join \"stripe\" \"s2\" on \"s\".\"id\" = \"s2\".\"segment_id\"\n"
                                  "         left join \"segment\" \"s\" on \"f\".\"id\" = \"s\".\"file_id\"\n"
-                                 "         left join \"erasure_share\" \"es\" on \"s2\".\"id\" = \"es\".\"stripe_id\"\n"
-                                 "         left join \"piece\" \"p\" on \"p\".\"id\" = \"es\".\"piece_id\"\n"
+                                 "         left join \"piece\" \"p\" on \"s\".\"id\" = \"p\".\"segment_id\"\n"
                                  "         left join \"storage_node\" \"sn\" on \"sn\".\"id\" = \"p\".\"storage_node_id\"\n"
-                                 "where \"f\".\"file_name\" = ?;";
+                                 "where \"f\".\"file_name\" = ?\n"
+                                 "order by \"s\".\"index\", \"p\".\"index\";";
         sqlite3_stmt *stmt;
         if (sqlite3_prepare_v2(sql, sql_select, -1, &stmt, nullptr) != SQLITE_OK) {
             return file;
         }
         sqlite3_bind_text(stmt, 1, filename.c_str(), filename.length(), nullptr);
+        std::vector<piece> pieces;
+        std::string last_segment_id;
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             piece p;
-            p.id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 1)));
-            p.storage_node_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 2)));
-            const std::string &segment_id = std::string(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 3)));
-            segment_id_to_pieces[segment_id].emplace_back(p);
+            p.id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 0)));
+            p.storage_node_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 1)));
+            p.segment_id = sg(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2)));
+            pieces.push_back(p);
+            const std::string &segment_id = to_string(p.segment_id);
+            if (last_segment_id != segment_id) {
+                last_segment_id = segment_id;
+                segment_id_to_pieces.emplace_back(segment_id, std::vector<piece>(0));
+            }
+            segment_id_to_pieces.back().second.push_back(p);
         }
         sqlite3_finalize(stmt);
     }
+    printf("segment num: %d\n", segment_id_to_pieces.size());
 
     // 遍历映射表，以 segment 为单位处理 piece
     std::vector<segment> segments;
@@ -645,95 +585,33 @@ file data_manager::download_file(const std::string &filename)
         std::vector<piece> &pieces = pair.second;
         // 从相应的 storage node 下载 piece data
         for (auto &piece: pieces) {
-            piece.data = download_piece(to_string(piece.id)).data;
+            const std::string &piece_id = to_string(piece.id);
+            printf("download piece id: %s\n", piece_id.c_str());
+            piece.data = std::move(download_piece(piece_id).data);
         }
 
         // 遍历 pieces
+        // 由于数据库查询 piece 时已经排序，此二维数组 erasure share 有序
+        puts("split piece");
         std::vector<std::vector<erasure_share>> s;
-        for (const auto &piece: pieces) {
-            const std::string &piece_id = to_string(piece.id);
+        for (auto &piece: pieces) {
             // piece 拆分成 erasure share（横向）
             std::vector<erasure_share> shares = dp.split_piece(piece);
-            // 从数据库查出 erasure share 元数据
-            const char *sql_select = "select \"id\",\n"
-                                     "       \"x_index\",\n"
-                                     "       \"y_index\",\n"
-                                     "       \"stripe_id\"\n"
-                                     "from \"erasure_share\"\n"
-                                     "where \"piece_id\" = ?\n"
-                                     "order by \"x_index\", \"y_index\";";
-            sqlite3_stmt *stmt;
-            if (sqlite3_prepare_v2(sql, sql_select, -1, &stmt, nullptr) != SQLITE_OK) {
-                return file;
-            }
-            sqlite3_bind_text(stmt, 1, piece_id.c_str(), piece_id.length(), nullptr);
-            for (int i = 0; sqlite3_step(stmt) == SQLITE_ROW; i++) {
-                erasure_share &share = shares[i];
-                share.id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 1)));
-                share.x_index = sqlite3_column_int(stmt, 2);
-                share.y_index = sqlite3_column_int(stmt, 3);
-                share.stripe_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 4)));
-            }
-            sqlite3_finalize(stmt);
-            // 横向排序
-            std::sort(shares.begin(), shares.end(), [=](const erasure_share &a, const erasure_share &b) {
-                return a.x_index < b.x_index;
-            });
-
             s.emplace_back(shares);
         }
 
-        // erasure shares 二维数组纵向排序
-        std::sort(s.begin(), s.end(), [=](const std::vector<erasure_share> &a, const std::vector<erasure_share> &b) {
-            return a[0].y_index < b[0].y_index;
-        });
-
-        // 选择任意一个 piece，关联查询出 stripes 的元数据
-        std::vector<stripe> stripes_metadata;
-        {
-            const piece &piece = pieces[0];
-            const std::string &piece_id = to_string(piece.id);
-            const char *sql_select = "select distinct \"s\".\"id\",\n"
-                                     "                \"s\".\"index\",\n"
-                                     "                \"s\".\"segment_id\"\n"
-                                     "from \"piece\" \"p\"\n"
-                                     "         left join \"erasure_share\" \"es\" on \"p\".\"id\" = \"es\".\"piece_id\"\n"
-                                     "         left join \"stripe\" \"s\" on \"s\".\"id\" = \"es\".\"stripe_id\"\n"
-                                     "where \"p\".\"id\" = ?\n"
-                                     "order by \"s\".\"index\";";
-            sqlite3_stmt *stmt;
-            if (sqlite3_prepare_v2(sql, sql_select, -1, &stmt, nullptr) != SQLITE_OK) {
-                return file;
-            }
-            sqlite3_bind_text(stmt, 1, piece_id.c_str(), piece_id.length(), nullptr);
-            while (sqlite3_step(stmt) == SQLITE_ROW) {
-                stripe stripe;
-                stripe.id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 1)));
-                stripe.index = sqlite3_column_int(stmt, 2);
-                stripe.segment_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 3)));
-                stripes_metadata.emplace_back(stripe);
-            }
-            sqlite3_finalize(stmt);
-        }
-
+        puts("merge to stripes");
         // erasure share decode，纵向拼接成 stripe，赋值元数据
         std::vector<stripe> stripes = dp.merge_to_stripes(s);
-        for (int i = 0; i < stripes.size(); i++) {
-            stripes[i].id = stripes_metadata[i].id;
-            stripes[i].index = stripes_metadata[i].index;
-            stripes[i].segment_id = stripes_metadata[i].segment_id;
-        }
 
+        puts("merge to segment");
         // stripe 拼接成 segment，查询出 segment 元数据
-        segment segment = db_select_segment(to_string(stripes[0].segment_id));
-        segment.data = dp.merge_to_segment(stripes).data;
+        segment segment = db_select_segment(segment_id);
+        segment.data = std::move(dp.merge_to_segment(stripes).data);
         segments.emplace_back(segment);
     }
-    // segments 排序
-    std::sort(segments.begin(), segments.end(), [=](const segment &a, const segment &b) {
-        return a.index < b.index;
-    });
 
+    puts("merge to file");
     // segment 拼接成 file
     file.segments = dp.merge_to_file(segments).segments;
     return file;
@@ -745,6 +623,7 @@ file data_manager::download_file(const std::string &filename)
  */
 std::tuple<std::vector<std::string>, std::vector<int>, std::vector<int>> data_manager::scan_corrupted_segments()
 {
+    // FIXME: 重构
     std::vector<std::string> segments_to_repair;
     std::vector<int> ks;
     std::vector<int> rs;
@@ -777,7 +656,7 @@ std::tuple<std::vector<std::string>, std::vector<int>, std::vector<int>> data_ma
                 continue;
             }
             while (sqlite3_step(stmt) == SQLITE_ROW) {
-                const std::string &segment_id = std::string(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1)));
+                const std::string &segment_id = std::string(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0)));
                 segment_ids.emplace_back(segment_id);
             }
             sqlite3_finalize(stmt);
@@ -796,7 +675,7 @@ std::tuple<std::vector<std::string>, std::vector<int>, std::vector<int>> data_ma
                 continue;
             }
             while (sqlite3_step(stmt) == SQLITE_ROW) {
-                piece_ids.emplace_back(std::string(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1))));
+                piece_ids.emplace_back(std::string(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0))));
             }
             sqlite3_finalize(stmt);
             // 审计 piece
@@ -833,6 +712,7 @@ std::tuple<std::vector<std::string>, std::vector<int>, std::vector<int>> data_ma
  */
 void data_manager::repair_segment(const std::string &segment_id)
 {
+    // FIXME: 重构
     // 查询对应的文件配置
     const segment &segment = db_select_segment(segment_id);
     const file &file = db_select_file_by_id(to_string(segment.file_id));
@@ -853,7 +733,7 @@ void data_manager::repair_segment(const std::string &segment_id)
             return;
         }
         while (sqlite3_step(stmt) == SQLITE_ROW) {
-            piece_ids.emplace_back(std::string(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1))));
+            piece_ids.emplace_back(std::string(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0))));
         }
         sqlite3_finalize(stmt);
     }
@@ -862,7 +742,7 @@ void data_manager::repair_segment(const std::string &segment_id)
     std::vector<std::vector<erasure_share>> s;
     std::vector<piece> pieces;
     for (const auto &piece_id: piece_ids) {
-        const piece &piece = download_piece(piece_id);
+        piece piece = download_piece(piece_id);
         if (!piece.id.is_nil()) {
             pieces.emplace_back(piece);
             // piece 拆分成 erasure share（横向）
@@ -883,10 +763,10 @@ void data_manager::repair_segment(const std::string &segment_id)
             sqlite3_bind_text(stmt, 1, piece_id.c_str(), piece_id.length(), nullptr);
             for (int i = 0; sqlite3_step(stmt) == SQLITE_ROW; i++) {
                 erasure_share &share = shares[i];
-                share.id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 1)));
-                share.x_index = sqlite3_column_int(stmt, 2);
-                share.y_index = sqlite3_column_int(stmt, 3);
-                share.stripe_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 4)));
+                share.id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 0)));
+                share.x_index = sqlite3_column_int(stmt, 1);
+                share.y_index = sqlite3_column_int(stmt, 2);
+                share.stripe_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 3)));
             }
             sqlite3_finalize(stmt);
             // 横向排序
@@ -923,9 +803,9 @@ void data_manager::repair_segment(const std::string &segment_id)
         sqlite3_bind_text(stmt, 1, piece_id.c_str(), piece_id.length(), nullptr);
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             stripe stripe;
-            stripe.id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 1)));
-            stripe.index = sqlite3_column_int(stmt, 2);
-            stripe.segment_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 3)));
+            stripe.id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 0)));
+            stripe.index = sqlite3_column_int(stmt, 1);
+            stripe.segment_id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 2)));
             stripes_metadata.emplace_back(stripe);
         }
         sqlite3_finalize(stmt);
