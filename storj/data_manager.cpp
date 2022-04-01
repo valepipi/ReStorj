@@ -179,24 +179,6 @@ void data_manager::db_insert_segment(const segment &s)
     sqlite3_finalize(stmt);
 }
 
-void data_manager::db_insert_erasure_share(const erasure_share &es)
-{
-    const std::string &erasure_share_id = to_string(es.id);
-    const std::string &stripe_id = to_string(es.stripe_id);
-    const std::string &piece_id = to_string(es.piece_id);
-    const char *sql_insert = "insert into \"erasure_share\"(\"id\", \"x_index\", \"y_index\", \"stripe_id\", \"piece_id\")\n"
-                             "values (?, ?, ?, ?, ?);";
-    sqlite3_stmt *stmt;
-    sqlite3_prepare_v2(sql, sql_insert, -1, &stmt, nullptr);
-    sqlite3_bind_text(stmt, 1, piece_id.c_str(), erasure_share_id.length(), nullptr);
-    sqlite3_bind_int(stmt, 2, es.x_index);
-    sqlite3_bind_int(stmt, 3, es.y_index);
-    sqlite3_bind_text(stmt, 4, stripe_id.c_str(), stripe_id.length(), nullptr);
-    sqlite3_bind_text(stmt, 5, piece_id.c_str(), piece_id.length(), nullptr);
-    sqlite3_step(stmt);
-    sqlite3_finalize(stmt);
-}
-
 void data_manager::db_insert_piece(const piece &p)
 {
     const std::string &piece_id = to_string(p.id);
@@ -486,9 +468,6 @@ void data_manager::upload_file(const std::string &filename, const config &cfg)
                 piece.id = uuid_v4();
                 piece.index = piece_index;
                 piece.segment_id = segment.id;
-                for (auto &share: piece.erasure_shares) {
-                    share.piece_id = piece.id;
-                }
             }
 
             // 上传 pieces 到各个存储节点

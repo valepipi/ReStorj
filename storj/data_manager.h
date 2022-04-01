@@ -44,7 +44,6 @@ namespace storj
 
         void db_insert_file(const file &f);
         void db_insert_segment(const segment &s);
-        void db_insert_erasure_share(const erasure_share &es);
         void db_insert_piece(const piece &p);
 
         void db_stmt_select_file(sqlite3_stmt *stmt, file *file);

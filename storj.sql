@@ -51,31 +51,6 @@ from "file" "f"
 where "f"."file_name" = ?
 order by "s"."index", "p"."index";
 
-select "p"."id",
-       "s2"."id"
-from "piece" "p"
-         left join "erasure_share" "es" on "p"."id" = "es"."piece_id"
-         left join "stripe" "s" on "s"."id" = "es"."stripe_id"
-         left join "segment" "s2" on "s2"."id" = "s"."segment_id"
-where "p"."id" = ?;
-
-select "id",
-       "x_index",
-       "y_index",
-       "stripe_id"
-from "erasure_share"
-where "piece_id" = ?
-order by "x_index", "y_index";
-
-select distinct "s"."id",
-                "s"."index",
-                "s"."segment_id"
-from "piece" "p"
-         left join "erasure_share" "es" on "p"."id" = "es"."piece_id"
-         left join "stripe" "s" on "s"."id" = "es"."stripe_id"
-where "p"."id" = ?
-order by "s"."index";
-
 select "s"."id"
 from "file" "f"
          left join "segment" "s" on "f"."id" = "s"."file_id"
