@@ -61,7 +61,7 @@ namespace storj
         data_manager();
         virtual ~data_manager();
         void upload_file(const std::string &filename, const config &cfg);
-        file download_file(const std::string &filename);
+        void download_file(const std::string &filename, const std::string &save_filename);
         std::tuple<std::vector<std::string>, std::vector<int>, std::vector<int>> scan_corrupted_segments();
         void repair_segment(const std::string &segment_id);
 

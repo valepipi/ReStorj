@@ -14,16 +14,27 @@
 
 namespace storj
 {
-    struct file
+    class file
     {
-        boost::uuids::uuid id;
+    private:
+        unsigned long written_count = 0;
+
+    public:
+        boost::uuids::uuid id{};
         std::string name;
         config cfg;
-        std::vector<segment> segments;
+        int fd = -1;
 
         file();
-        file(const config &cfg);
         file(std::string filename, const config &cfg);
+        virtual ~file();
+
+        int open_read();
+        int open_write(const std::string &filename);
+        void close();
+        file &operator>>(segment &s);
+        file &operator<<(segment &s);
+        explicit operator bool() const;
     };
 }
 

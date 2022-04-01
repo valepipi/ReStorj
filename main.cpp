@@ -40,11 +40,12 @@ bool compare_file(const std::string &filename1, const std::string &filename2)
         perror("Failed to open file");
         return false;
     }
-    const int unit = 16 << 10;
+    const int unit = 128 << 10;
     char buf1[unit] = { 0 };
     char buf2[unit] = { 0 };
-    int n1;
-    int n2;
+    unsigned long total_n;
+    long n1;
+    long n2;
     while (true) {
         n1 = read(fd1, buf1, unit);
         n2 = read(fd2, buf2, unit);
@@ -57,11 +58,13 @@ bool compare_file(const std::string &filename1, const std::string &filename2)
         if (n1 <= 0) {
             break;
         }
+        total_n += n1;
         for (int i = 0; i < unit; i++) {
             if (buf1[i] != buf2[i]) {
                 close(fd1);
                 close(fd2);
                 puts("222");
+                printf("total n: %lu\n", total_n);
                 return false;
             }
         }
@@ -71,9 +74,9 @@ bool compare_file(const std::string &filename1, const std::string &filename2)
     return true;
 }
 
-void create_file(int size)
+void create_file(unsigned long size)
 {
-    const int unit = 128 << 10;
+    const unsigned long unit = 128 << 10;
     // Write the file
     int fd = open(FILENAME_IN.c_str(), O_CREAT | O_RDWR);
     if (fd == -1) {
@@ -95,10 +98,10 @@ int main()
     manager = new storj::data_manager();
 
     storj::config cfg;
-    cfg.file_size = 100 << 20;
-    cfg.segment_size = 64 << 20;
-    cfg.stripe_size = 1 << 10;
-    cfg.erasure_share_size = 256;
+    cfg.file_size = 2000UL << 20;
+    cfg.segment_size = 64UL << 20;
+    cfg.stripe_size = 1UL << 10;
+    cfg.erasure_share_size = 256UL;
     cfg.k = 4;
     cfg.m = 8;
     cfg.n = 10;
@@ -106,37 +109,17 @@ int main()
     create_file(cfg.file_size);
     puts("file created");
 
+    // 上传
+    puts("upload");
     manager->upload_file(FILENAME_IN, cfg);
-    const storj::file &file = manager->download_file(FILENAME_IN);
-
-    // 下载到的文件仍在内存中，写到硬盘
-    {
-        // 删除硬盘中的 data-out.txt
-        remove(FILENAME_OUT.c_str());
-
-        // 写文件
-        const int unit = 16 << 10;
-        int fd = open(FILENAME_OUT.c_str(), O_CREAT | O_RDWR);
-        if (fd == -1) {
-            perror("Failed to open file");
-            return 1;
-        }
-        for (int i = 0; i < file.segments.size(); i++) {
-            const storj::segment &segment = file.segments[i];
-            for (int j = 0; j < segment.data.size(); j += unit) {
-                int size = std::min(unit, (int) segment.data.size() - j);
-                // 写到最后一个 segment 时，可能有冗余数据
-                if (i == file.segments.size() - 1) {
-                    size = std::min(size, cfg.file_size % cfg.segment_size - j);
-                }
-                write(fd, segment.data.data() + j, size);
-            }
-        }
-        close(fd);
-        puts("downloaded");
-    }
+    // 删除硬盘中的 data-out.txt
+    remove(FILENAME_OUT.c_str());
+    // 下载
+    puts("download");
+    manager->download_file(FILENAME_IN, FILENAME_OUT);
 
     // 比较上传与下载的文件内容是否相同
+    puts("compare");
     if (compare_file(FILENAME_IN, FILENAME_OUT)) {
         std::cout << "Same" << std::endl;
     } else {

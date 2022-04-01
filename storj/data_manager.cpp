@@ -153,10 +153,10 @@ void data_manager::db_insert_file(const file &f)
     sqlite3_prepare_v2(sql, sql_insert, -1, &stmt, nullptr);
     sqlite3_bind_text(stmt, 1, file_id.c_str(), file_id.length(), nullptr);
     sqlite3_bind_text(stmt, 2, f.name.c_str(), f.name.length(), nullptr);
-    sqlite3_bind_int(stmt, 3, f.cfg.file_size);
-    sqlite3_bind_int(stmt, 4, f.cfg.segment_size);
-    sqlite3_bind_int(stmt, 5, f.cfg.stripe_size);
-    sqlite3_bind_int(stmt, 6, f.cfg.erasure_share_size);
+    sqlite3_bind_int64(stmt, 3, f.cfg.file_size);
+    sqlite3_bind_int64(stmt, 4, f.cfg.segment_size);
+    sqlite3_bind_int64(stmt, 5, f.cfg.stripe_size);
+    sqlite3_bind_int64(stmt, 6, f.cfg.erasure_share_size);
     sqlite3_bind_int(stmt, 7, f.cfg.k);
     sqlite3_bind_int(stmt, 8, f.cfg.m);
     sqlite3_bind_int(stmt, 9, f.cfg.n);
@@ -201,10 +201,10 @@ void data_manager::db_stmt_select_file(sqlite3_stmt *stmt, file *file)
     boost::uuids::string_generator sg;
     file->id = sg(reinterpret_cast<const char *const>(sqlite3_column_text(stmt, 0)));
     file->name = std::string(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1)));
-    file->cfg.file_size = sqlite3_column_int(stmt, 2);
-    file->cfg.segment_size = sqlite3_column_int(stmt, 3);
-    file->cfg.stripe_size = sqlite3_column_int(stmt, 4);
-    file->cfg.erasure_share_size = sqlite3_column_int(stmt, 5);
+    file->cfg.file_size = sqlite3_column_int64(stmt, 2);
+    file->cfg.segment_size = sqlite3_column_int64(stmt, 3);
+    file->cfg.stripe_size = sqlite3_column_int64(stmt, 4);
+    file->cfg.erasure_share_size = sqlite3_column_int64(stmt, 5);
     file->cfg.k = sqlite3_column_int(stmt, 6);
     file->cfg.m = sqlite3_column_int(stmt, 7);
     file->cfg.n = sqlite3_column_int(stmt, 8);
@@ -439,10 +439,9 @@ void data_manager::upload_file(const std::string &filename, const config &cfg)
         db_insert_file(file);
 
         // 读文件，切割成 segment 并遍历
-        std::vector<segment> segments = dp.split_file(file);
-        for (int segment_index = 0; segment_index < segments.size(); segment_index++) {
+        segment segment;
+        for (int segment_index = 0; file >> segment; segment_index++) {
             printf("segment index: %d\n", segment_index);
-            segment &segment = segments[segment_index];
             // segment id
             segment.id = uuid_v4();
             segment.index = segment_index;
@@ -512,10 +511,11 @@ void data_manager::upload_file(const std::string &filename, const config &cfg)
  * @param filename 文件名
  * @return 文件
  */
-file data_manager::download_file(const std::string &filename)
+void data_manager::download_file(const std::string &filename, const std::string &save_filename)
 {
     // 从数据库中查出对应的 file 数据
     file file = db_select_file_by_name(filename);
+    file.open_write(save_filename);
     data_processor dp(file.cfg);
 
     // 从数据库中有序查出对应的 piece 数据
@@ -534,7 +534,7 @@ file data_manager::download_file(const std::string &filename)
                                  "order by \"s\".\"index\", \"p\".\"index\";";
         sqlite3_stmt *stmt;
         if (sqlite3_prepare_v2(sql, sql_select, -1, &stmt, nullptr) != SQLITE_OK) {
-            return file;
+            return;
         }
         sqlite3_bind_text(stmt, 1, filename.c_str(), filename.length(), nullptr);
         std::vector<piece> pieces;
@@ -554,11 +554,12 @@ file data_manager::download_file(const std::string &filename)
         }
         sqlite3_finalize(stmt);
     }
-    printf("segment num: %d\n", segment_id_to_pieces.size());
+    printf("segment num: %lu\n", segment_id_to_pieces.size());
 
     // 遍历映射表，以 segment 为单位处理 piece
-    std::vector<segment> segments;
+    int segment_index = 0;
     for (auto &pair: segment_id_to_pieces) {
+        printf("segment index: %d\n", segment_index++);
         const std::string &segment_id = pair.first;
         std::vector<piece> &pieces = pair.second;
         // 从相应的 storage node 下载 piece data
@@ -586,13 +587,9 @@ file data_manager::download_file(const std::string &filename)
         // stripe 拼接成 segment，查询出 segment 元数据
         segment segment = db_select_segment(segment_id);
         segment.data = std::move(dp.merge_to_segment(stripes).data);
-        segments.emplace_back(segment);
+        // 流式写入文件
+        file << segment;
     }
-
-    puts("merge to file");
-    // segment 拼接成 file
-    file.segments = dp.merge_to_file(segments).segments;
-    return file;
 }
 
 /**

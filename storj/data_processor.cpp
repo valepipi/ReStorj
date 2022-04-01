@@ -2,9 +2,6 @@
 // Created by ousing9 on 2022/3/9.
 //
 
-#include <fcntl.h>
-#include <unistd.h>
-
 #include "config.h"
 #include "data_processor.h"
 #include "file.h"
@@ -13,34 +10,6 @@ using namespace storj;
 
 data_processor::data_processor(const config &cfg) : cfg(cfg)
 {}
-
-std::vector<segment> data_processor::split_file(file &f)
-{
-    // TODO: 改写成流式处理
-    // 打开文件
-    int fd = open(f.name.c_str(), O_RDONLY);
-    if (fd == -1) {
-        throw "File not exists";
-    }
-
-    // 以 size 为单位读取文件
-    char *segment_data = new char[cfg.segment_size];
-    int n;
-    while ((n = read(fd, segment_data, cfg.segment_size)) > 0) {
-        f.segments.emplace_back(std::vector<char>(segment_data, segment_data + n));
-    }
-    delete[] segment_data;
-
-
-    // 最后一个 segment 补 0
-    if (!f.segments.empty()) {
-        segment &s = f.segments.back();
-        while (s.data.size() < cfg.segment_size) {
-            s.data.emplace_back(0);
-        }
-    }
-    return f.segments;
-}
 
 std::vector<stripe> data_processor::split_segment(segment &s) const
 {
@@ -147,13 +116,6 @@ segment data_processor::merge_to_segment(std::vector<stripe> &stripes) const
     for (auto &stripe: stripes) {
         res.data.insert(res.data.end(), std::make_move_iterator(stripe.data.begin()), std::make_move_iterator(stripe.data.end()));
     }
-    return res;
-}
-
-file data_processor::merge_to_file(std::vector<segment> &segments) const
-{
-    file res;
-    res.segments = segments;
     return res;
 }
 

@@ -10,11 +10,11 @@ namespace storj
 {
     struct config
     {
-        int file_size;
-        int segment_size;
-        int stripe_size;
-        int erasure_share_size;
-        int piece_size;
+        unsigned long file_size;
+        unsigned long segment_size;
+        unsigned long stripe_size;
+        unsigned long erasure_share_size;
+        unsigned long piece_size;
         int k;
         int m;
         int n;

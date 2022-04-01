@@ -24,14 +24,12 @@ namespace storj
     public:
         data_processor(const config &cfg);
 
-        std::vector<segment> split_file(file &f);
         std::vector<stripe> split_segment(storj::segment &s) const;
         std::vector<erasure_share> erasure_encode(storj::stripe &s) const;
         std::vector<piece> merge_to_pieces(std::vector<std::vector<erasure_share>> &s) const;
         std::vector<erasure_share> split_piece(storj::piece &p) const;
         std::vector<stripe> merge_to_stripes(std::vector<std::vector<erasure_share>> &s) const;
         segment merge_to_segment(std::vector<stripe> &stripes) const;
-        file merge_to_file(std::vector<segment> &segments) const;
         std::vector<stripe> repair_stripes_from_erasure_shares(const std::vector<std::vector<erasure_share>> &s) const;
     };
 }
