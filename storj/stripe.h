@@ -14,6 +14,9 @@ namespace storj
 {
     struct stripe
     {
+        boost::uuids::uuid id;
+        boost::uuids::uuid segment_id;
+        int index;
         std::vector<char> data;
 
         stripe();

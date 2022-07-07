@@ -14,7 +14,12 @@ namespace storj
 {
     struct erasure_share
     {
+        boost::uuids::uuid id;
+        boost::uuids::uuid stripe_id;
+        boost::uuids::uuid piece_id;
         std::vector<char> data;
+        int x_index;
+        int y_index;
 
         erasure_share();
         erasure_share(std::vector<char> data);
